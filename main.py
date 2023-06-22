@@ -1,73 +1,52 @@
 import requests
-import bs4
 from fake_headers import Headers
-import time
-import requests_html
+from bs4 import BeautifulSoup
+import json
 
 
-url = r"https://spb.hh.ru/search/vacancy?text=python&area=1&area=2"
+def get_headers():
+    headers = Headers(browser="firefox", os='win')
+    return headers.generate()
 
-keywords = ["Django", "django", "Flask", "flask"]
 
-### mian function / Moscow/St. Petersburg, Python, Django/Flask
+def hhparsingrubbles():
+    HOST = 'https://spb.hh.ru/search/vacancy?text=python&area=1&area=2'
+    responsevacancies = requests.get(HOST, headers=get_headers()).text
+    soup = BeautifulSoup(responsevacancies, features='lxml')
+    vacancieslist = soup.find("main", {"class": "vacancy-serp-content"})
+    vacancies = vacancieslist.find_all('div', {'class': 'serp-item'})
+    parsed = []
+    for vacancy in vacancies:
 
-headers = Headers(browser="firefox", os="win")
-headers_data = headers.generate()
+        title = vacancy.find('a', class_='serp-item__title')
+        link = title['href']
+        vacancy_name = title.text
 
-main_page_html = requests.get(url, headers=headers_data).text
-main_page_soup = bs4.BeautifulSoup(main_page_html, "lxml")
-tags = main_page_soup.find_all(
-    "div", {"class": "vacancy-serp-item__layout"}
-)  ### Main problem, parser finds only 20 div instead of 50
-
-vacancy = []
-
-for tag in tags:
-    vacancy_name = tag.find("a", {"class": "serp-item__title"}).text
-    for keyword in keywords:  ## Checking keyword in vacancy
-        if keyword in vacancy_name:
-            link = tag.find("a", {"class": "serp-item__title"})["href"]
-            city = tag.find("div", {"data-qa": "vacancy-serp__vacancy-address"})
-            company_name = tag.find("a", {"data-qa": "vacancy-serp__vacancy-employer"})
-            vacancy_paycheck = tag.find(
-                "span", {"data-qa": "vacancy-serp__vacancy-compensation"}
-            )
-            if city:  # if city not None
-                city = city.text.replace("\xa0", " ")
+        response = requests.get(link, headers=get_headers())
+        vacancy_article = BeautifulSoup(response.text, features='lxml')
+        vacancy_description = vacancy_article.find('div', {'data-qa': 'vacancy-description'}).text
+        if ('django' in vacancy_description.lower()) or ('flask' in vacancy_description.lower()):
+            fork = vacancy.find('span', class_='bloko-header-section-3')
+            if fork is not None:
+                fork = fork.text.strip()
+                fork = fork.replace("\u202f", " ")
             else:
-                city = "None"
-            if company_name:
-                company_name = company_name.text
-            else:
-                company_name = "None"
-            if vacancy_paycheck:  # if payment not None
-                vacancy_paycheck = vacancy_paycheck.text
-                vacancy_paycheck = vacancy_paycheck.replace("\u202f", " ")
-                ls = [
-                    vacancy_name,
-                    {
-                        "payment": vacancy_paycheck,
-                        "link": link,
-                        "company name": company_name,
-                        "city": city,
-                    },
-                ]
-            else:
-                ls = [
-                    vacancy_name,
-                    {
-                        "payment": "None",
-                        "link": link,
-                        "company name": company_name,
-                        "city": city,
-                    },
-                ]
-            vacancy.append(ls)
-
-print(len(vacancy), vacancy)
+                fork = 'з/п не указана'
+            company = vacancy.find('a', class_='bloko-link bloko-link_kind-tertiary').text
+            city = vacancy.find('div', {'data-qa': 'vacancy-serp__vacancy-address'}).text
+            #  attrs={'data-qa': 'vacancy-serp__vacancy-address'}
+            item = {
+                'Название должности': vacancy_name,
+                'Ссылка': link,
+                'Вилка зп': fork,
+                'Компания': company,
+                'Город': city
+            }
+            parsed.append(item)
+    return parsed
 
 
-### conver to json func (link, paycheck array, company, city)
-
-
-### Secondary task - add only USD jobs.
+if __name__ == '__main__':
+    parsedrub = hhparsingrubbles()
+    with open('vacancies.json', 'w', encoding='UTF-8') as file:
+        json.dump(parsedrub, file, indent=5, ensure_ascii=False)
